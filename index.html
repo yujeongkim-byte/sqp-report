@@ -370,7 +370,9 @@ async function parseCSV(text, filename='paste') {
   const iWeek=find('Week','주차');
   const iRank=find('Search Query Score','순위');
   const iKw=find('Search Query','유입 검색어');
+  const iVol=find('Search Query Volume','검색량','검색 규모');
   const iImp=find('Impressions: Brand Count','노출 수');
+  const iImpTotal=find('Impressions: Total Count','전체 노출');
   const iImpShare=find('Impressions: Brand Share','노출 점유율');
   const iClk=find('Clicks: Brand Count','클릭 수');
   const iClkShare=find('Clicks: Brand Share','클릭 점유율');
@@ -395,6 +397,7 @@ async function parseCSV(text, filename='paste') {
     const row={
       week:normalizeWeek(currentWeek), rank:pn(iRank), keyword:kw.toLowerCase().trim(),
       impressions:pn(iImp), impShare:pn(iImpShare),
+      searchVolume:pn(iVol), impTotal:pn(iImpTotal),
       clicks, clickShare:pn(iClkShare), cart:pn(iCart), purchases, cvr
     };
     if(row.impressions===0&&row.purchases===0){skipped++;continue;}
@@ -514,8 +517,10 @@ function renderWeekly(){
 }
 
 function weeklyTable(data){
+  const hasVol = data.some(d=>d.searchVolume>0);
   const head=`<thead><tr>
     <th>순위</th><th>키워드</th>
+    ${hasVol?'<th style="text-align:right">전체 검색량</th>':''}
     <th style="text-align:right">노출</th><th style="text-align:right">노출점유율</th>
     <th style="text-align:right">클릭</th><th style="text-align:right">클릭점유율</th>
     <th style="text-align:right">장바구니</th><th style="text-align:right">구매</th><th style="text-align:right">전환율</th>
@@ -523,6 +528,7 @@ function weeklyTable(data){
   const body=data.map((d,i)=>`<tr>
     <td><span class="rank-badge ${i<3?'top3':''}">${d.rank||i+1}</span></td>
     <td class="kw ${isBrand(d.keyword)?'brand-kw':''}">${d.keyword}</td>
+    ${hasVol?`<td class="num" style="color:var(--text-muted)">${d.searchVolume?d.searchVolume.toLocaleString():'–'}</td>`:''}
     <td class="num">${d.impressions.toLocaleString()}</td>
     <td class="num">${d.impShare.toFixed(2)}%</td>
     <td class="num">${d.clicks.toLocaleString()}</td>
@@ -570,6 +576,8 @@ function renderCompare(){
   const merged=allKws.map(kw=>({kw,r1:d1.find(d=>d.keyword===kw),r2:d2.find(d=>d.keyword===kw)}))
     .sort((a,b)=>(b.r2?b.r2.purchases:0)-(a.r2?a.r2.purchases:0));
 
+  const hasVolCmp = [...d1,...d2].some(d=>d.searchVolume>0);
+
   document.getElementById('compare-content').innerHTML=`
     <div class="kpi-row">
       ${cmpKpi('노출',fmtNum(t1.impressions),fmtNum(t2.impressions),pct(t2.impressions,t1.impressions))}
@@ -579,9 +587,13 @@ function renderCompare(){
     </div>
     <div class="section">
       <div class="section-title">키워드별 비교 <span style="font-size:10px;font-weight:400;color:var(--text-dim);text-transform:none">${formatWeek(w1)} → ${formatWeek(w2)}</span></div>
+      ${hasVolCmp?`<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
+        💡 <strong>노출 증가율</strong>이 <strong>검색량 증가율</strong>보다 높으면 우리 랭킹/광고 경쟁력이 개선된 것이고, 비슷하거나 낮으면 시장 자체가 커진 영향이 커요.
+      </div>`:''}
       <div class="table-wrap">
         <table><thead><tr>
           <th>키워드</th>
+          ${hasVolCmp?'<th style="text-align:right">검색량(전)</th><th style="text-align:right">검색량(후)</th><th style="text-align:right">검색량%</th>':''}
           <th style="text-align:right">노출(전)</th><th style="text-align:right">노출(후)</th><th style="text-align:right">노출%</th><th style="text-align:right">노출점유율(후)</th>
           <th style="text-align:right">클릭(후)</th><th style="text-align:right">클릭점유율(후)</th>
           <th style="text-align:right">장바구니(후)</th>
@@ -590,10 +602,23 @@ function renderCompare(){
         </tr></thead><tbody>
         ${merged.map(({kw,r1,r2})=>{
           const ic=r1&&r2?pct(r2.impressions,r1.impressions):null;
+          const vc=r1&&r2&&r1.searchVolume&&r2.searchVolume?pct(r2.searchVolume,r1.searchVolume):null;
           const pc=r1&&r2?pct(r2.purchases,r1.purchases):null;
           const status=!r1?'🆕 신규':!r2?'❌ 이탈':'';
+          // 노출 증가율이 검색량 증가율보다 유의미하게 높으면 경쟁력 개선 표시
+          let gapBadge='';
+          if(ic!==null&&vc!==null){
+            const gap=ic-vc;
+            if(gap>=15) gapBadge=' <span style="font-size:9px;color:var(--green);background:rgba(18,169,112,0.1);padding:1px 5px;border-radius:3px" title="검색량 대비 노출 증가율이 더 큼 — 경쟁력 개선">↑경쟁력</span>';
+            else if(gap<=-15) gapBadge=' <span style="font-size:9px;color:var(--red);background:rgba(224,61,61,0.1);padding:1px 5px;border-radius:3px" title="검색량 대비 노출 증가율이 더 낮음 — 점유율 하락">↓점유율</span>';
+          }
           return `<tr>
-            <td class="kw ${isBrand(kw)?'brand-kw':''}" style="font-size:11px">${kw}</td>
+            <td class="kw ${isBrand(kw)?'brand-kw':''}" style="font-size:11px">${kw}${gapBadge}</td>
+            ${hasVolCmp?`
+            <td class="num" style="color:var(--text-muted)">${r1&&r1.searchVolume?r1.searchVolume.toLocaleString():'–'}</td>
+            <td class="num" style="color:var(--text-muted)">${r2&&r2.searchVolume?r2.searchVolume.toLocaleString():'–'}</td>
+            <td class="num"><span class="chg ${clsV(vc)}">${fmtPct(vc)}</span></td>
+            `:''}
             <td class="num">${r1?r1.impressions.toLocaleString():'–'}</td>
             <td class="num">${r2?r2.impressions.toLocaleString():'–'}</td>
             <td class="num"><span class="chg ${clsV(ic)}">${fmtPct(ic)}</span></td>

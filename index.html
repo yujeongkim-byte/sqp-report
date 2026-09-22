@@ -122,7 +122,8 @@
         <div style="padding:8px 10px;font-size:11px;color:var(--text-muted);line-height:1.9">
           주차 수: <strong id="week-count" style="color:var(--text)">0</strong><br>
           기간: <strong id="date-range" style="color:var(--text)">-</strong><br>
-          총 키워드: <strong id="kw-count" style="color:var(--text)">0</strong>
+          총 키워드: <strong id="kw-count" style="color:var(--text)">0</strong><br>
+          광고 데이터: <strong id="ad-count" style="color:var(--text)">0행</strong>
         </div>
 
         <label style="display:block;margin-top:6px">
@@ -167,6 +168,17 @@
           💡 <strong>데이터 자동 누적</strong><br>
           CSV 업로드하면 브라우저(IndexedDB)에 자동 저장돼요.<br>
           새로고침해도 데이터 유지 — 매주 CSV만 업로드하면 끝!
+        </div>
+
+        <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border)">
+          <div class="section-title">📢 SP 내부광고 키워드 CSV 업로드 <span style="font-weight:400;color:var(--text-dim);text-transform:none;font-size:10px">(선택 — SQP와 주차·키워드 매칭되어 광고비/ACOS/ROAS 함께 표시)</span></div>
+          <div class="upload-zone" id="ad-drop-zone" onclick="document.getElementById('ad-csv-input').click()" ondragover="handleAdDrag(event,true)" ondragleave="handleAdDrag(event,false)" ondrop="handleAdDrop(event)">
+            <div style="font-size:24px;margin-bottom:8px">📢</div>
+            <p><strong>SP Targeting Report CSV 업로드</strong><br>클릭하거나 드래그&드롭<br><br>
+            ✅ Date / Targeting / Impressions / Clicks / Spend / ACOS / ROAS / Orders 컬럼 포함 원본</p>
+          </div>
+          <input type="file" id="ad-csv-input" accept=".csv,.tsv,.txt" multiple onchange="handleAdFiles(this.files)">
+          <div id="ad-upload-log" style="margin-top:10px;font-size:12px;color:var(--text-muted);line-height:1.8"></div>
         </div>
       </div>
 
@@ -508,7 +520,7 @@ function renderWeekly(){
     </div>
     <div class="section">
       <div class="section-title">전체 키워드 (최대 100개)</div>
-      <div class="table-wrap">${weeklyTable(data)}</div>
+      <div class="table-wrap">${weeklyTable(data, week)}</div>
     </div>
     <div class="two-col">
       <div class="section"><div class="section-title">브랜드 키워드</div><div class="table-wrap">${miniTable(brandD,bTot)}</div></div>
@@ -516,14 +528,17 @@ function renderWeekly(){
     </div>`;
 }
 
-function weeklyTable(data){
+function weeklyTable(data, week){
   const hasVol = data.some(d=>d.searchVolume>0);
+  const adMap = (adData.length && week) ? getAdForWeek(week) : {};
+  const hasAd = Object.keys(adMap).length>0;
   const head=`<thead><tr>
     <th>순위</th><th>키워드</th>
     ${hasVol?'<th style="text-align:right">전체 검색량</th>':''}
     <th style="text-align:right">노출</th><th style="text-align:right">노출점유율</th>
     <th style="text-align:right">클릭</th><th style="text-align:right">클릭점유율</th>
     <th style="text-align:right">장바구니</th><th style="text-align:right">구매</th><th style="text-align:right">전환율</th>
+    ${hasAd?'<th style="text-align:right">광고비</th><th style="text-align:right">ACOS</th><th style="text-align:right">ROAS</th>':''}
   </tr></thead>`;
   const body=data.map((d,i)=>`<tr>
     <td><span class="rank-badge ${i<3?'top3':''}">${d.rank||i+1}</span></td>
@@ -536,6 +551,7 @@ function weeklyTable(data){
     <td class="num">${d.cart}</td>
     <td class="num"><strong>${d.purchases}</strong></td>
     <td class="num" style="color:${cvrColor(d.cvr)}">${d.cvr.toFixed(2)}%</td>
+    ${hasAd?adCellHtml(findAdForKeyword(d.keyword,adMap)):''}
   </tr>`).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
@@ -577,6 +593,8 @@ function renderCompare(){
     .sort((a,b)=>(b.r2?b.r2.purchases:0)-(a.r2?a.r2.purchases:0));
 
   const hasVolCmp = [...d1,...d2].some(d=>d.searchVolume>0);
+  const adMap2 = adData.length ? getAdForWeek(w2) : {};
+  const hasAdCmp = Object.keys(adMap2).length>0;
 
   document.getElementById('compare-content').innerHTML=`
     <div class="kpi-row">
@@ -590,6 +608,9 @@ function renderCompare(){
       ${hasVolCmp?`<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
         💡 <strong>노출 증가율</strong>이 <strong>검색량 증가율</strong>보다 높으면 우리 랭킹/광고 경쟁력이 개선된 것이고, 비슷하거나 낮으면 시장 자체가 커진 영향이 커요.
       </div>`:''}
+      ${hasAdCmp?`<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
+        📢 <strong>광고비/ACOS/ROAS</strong>는 ${formatWeek(w2)} 주차 기준 SP 광고 데이터가 매칭된 값이에요.
+      </div>`:''}
       <div class="table-wrap">
         <table><thead><tr>
           <th>키워드</th>
@@ -599,6 +620,7 @@ function renderCompare(){
           <th style="text-align:right">장바구니(후)</th>
           <th style="text-align:right">구매(전)</th><th style="text-align:right">구매(후)</th>
           <th style="text-align:right">전환(전)</th><th style="text-align:right">전환(후)</th><th>상태</th>
+          ${hasAdCmp?'<th style="text-align:right">광고비</th><th style="text-align:right">ACOS</th><th style="text-align:right">ROAS</th>':''}
         </tr></thead><tbody>
         ${merged.map(({kw,r1,r2})=>{
           const ic=r1&&r2?pct(r2.impressions,r1.impressions):null;
@@ -631,6 +653,7 @@ function renderCompare(){
             <td class="num" style="color:${r1?cvrColor(r1.cvr):'var(--text-dim)'}">${r1?r1.cvr.toFixed(2)+'%':'–'}</td>
             <td class="num" style="color:${r2?cvrColor(r2.cvr):'var(--text-dim)'}">${r2?r2.cvr.toFixed(2)+'%':'–'}</td>
             <td style="font-size:11px">${status}</td>
+            ${hasAdCmp?adCellHtml(findAdForKeyword(kw,adMap2)):''}
           </tr>`;
         }).join('')}
         </tbody></table>
@@ -1000,7 +1023,7 @@ async function clearData(){
   document.getElementById('upload-log').innerHTML='✅ 초기화 완료';
 }
 
-(async () => { await loadFromStorage(); })();
+(async () => { await loadFromStorage(); await loadAdFromStorage(); })();
 
 // ── TREND ──
 const CHART_COLORS = [
@@ -1438,6 +1461,159 @@ async function pushRowsToServer(rows){
     }
   }
 })();
+
+
+// ══════════════════════════════════════════
+// SP 내부광고 키워드 데이터 (선택 기능)
+// ══════════════════════════════════════════
+let adData = [];
+
+async function saveAdToStorage(){
+  try {
+    const db = await _openDb();
+    await new Promise((resolve, reject)=>{
+      const tx = db.transaction(_DB_STORE, 'readwrite');
+      tx.objectStore(_DB_STORE).put(adData, 'ad_data');
+      tx.oncomplete = resolve;
+      tx.onerror = ()=>reject(tx.error);
+    });
+    db.close();
+  } catch(e){ adLog('❌ 광고 데이터 저장 실패: '+e.message); }
+}
+async function loadAdFromStorage(){
+  try {
+    const db = await _openDb();
+    const data = await new Promise((resolve,reject)=>{
+      const tx = db.transaction(_DB_STORE, 'readonly');
+      const req = tx.objectStore(_DB_STORE).get('ad_data');
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+    db.close();
+    if(Array.isArray(data) && data.length) adData = data;
+  } catch(e){}
+  updateAdCount();
+}
+function updateAdCount(){
+  const el = document.getElementById('ad-count');
+  if(el) el.textContent = adData.length.toLocaleString()+'행';
+}
+function adLog(msg){
+  const el = document.getElementById('ad-upload-log');
+  if(el) el.innerHTML += `<div>${msg}</div>`;
+}
+function handleAdDrag(e,over){ e.preventDefault(); document.getElementById('ad-drop-zone').classList.toggle('drag',over); }
+function handleAdDrop(e){ e.preventDefault(); document.getElementById('ad-drop-zone').classList.remove('drag'); handleAdFiles(e.dataTransfer.files); }
+function handleAdFiles(files){ Array.from(files).forEach(f=>{ const r=new FileReader(); r.onload=e=>parseAdCSV(e.target.result,f.name); r.readAsText(f,'UTF-8'); }); }
+
+// ASIN/자동타겟팅(close-match, loose-match, substitutes, complements 등) 제외 — 실제 키워드만 채택
+function isRealKeyword(t){
+  const s = t.toLowerCase().trim();
+  if(!s) return false;
+  if(s.startsWith('asin=')) return false;
+  if(['close-match','loose-match','substitutes','complements'].includes(s)) return false;
+  return true;
+}
+
+async function parseAdCSV(text, filename){
+  text = text.replace(/^\uFEFF/,'');
+  const allLines = text.split('\n').map(l=>l.trim()).filter(l=>l.replace(/,/g,'').trim().length>0);
+  if(allLines.length<2){ adLog('❌ '+filename+': 데이터 부족'); return; }
+
+  // 헤더 행 자동 탐색 (Date, Targeting 등이 포함된 행)
+  let headerIdx = -1;
+  for(let i=0;i<Math.min(10,allLines.length);i++){
+    if(allLines[i].includes('Targeting') && (allLines[i].includes('Date')||allLines[i].includes('Impressions'))){
+      headerIdx = i; break;
+    }
+  }
+  if(headerIdx<0){ adLog('❌ '+filename+': 헤더 행을 찾을 수 없음 (Date/Targeting 컬럼 필요)'); return; }
+
+  const lines = allLines.slice(headerIdx);
+  const delim = lines[0].includes('\t') ? '\t' : ',';
+  function splitRow(line){
+    const res=[]; let cur='',inQ=false;
+    for(let i=0;i<line.length;i++){
+      if(line[i]==='"'){inQ=!inQ;continue;}
+      if(line[i]===delim&&!inQ){res.push(cur.trim());cur='';continue;}
+      cur+=line[i];
+    }
+    res.push(cur.trim()); return res;
+  }
+  const headers = splitRow(lines[0]);
+  const find = (...keys)=>{
+    for(const k of keys){ const i=headers.findIndex(h=>h.toLowerCase().includes(k.toLowerCase())); if(i>=0) return i; }
+    return -1;
+  };
+  const iDate=find('Date'), iTarget=find('Targeting'), iImp=find('Impressions'),
+        iClk=find('Clicks'), iSpend=find('Spend'), iAcos=find('ACOS'), iRoas=find('ROAS'),
+        iSales=find('7 Day Total Sales','Total Sales'), iOrders=find('7 Day Total Orders','Total Orders');
+
+  let added=0, skipped=0;
+  for(let i=1;i<lines.length;i++){
+    const cols = splitRow(lines[i]);
+    if(cols.length<3) continue;
+    const dateStr = iDate>=0?cols[iDate]:'';
+    const target = iTarget>=0?cols[iTarget]:'';
+    if(!dateStr || !target || !isRealKeyword(target)){ skipped++; continue; }
+    const pn = idx=>{ if(idx<0||idx>=cols.length||!cols[idx]) return 0; return parseFloat(cols[idx].replace(/[,$%]/g,''))||0; };
+    const week = normalizeWeek(dateStr);
+    const row = {
+      date: week, keyword: target.toLowerCase().trim(),
+      impressions: pn(iImp), clicks: pn(iClk), spend: pn(iSpend),
+      acos: pn(iAcos), roas: pn(iRoas), sales: pn(iSales), orders: pn(iOrders)
+    };
+    adData.push(row);
+    added++;
+  }
+  await saveAdToStorage();
+  updateAdCount();
+  adLog(`✅ ${filename}: ${added}개 행 추가, ${skipped}개 건너뜀 (ASIN/자동타겟팅 제외) | 총 누적 ${adData.length}행`);
+}
+
+// SQP 주차(week: YYYY-MM-DD, 그 주 시작일)에 해당하는 7일 범위의 광고 데이터를
+// 키워드 기준으로 합산하여 반환 { keyword: {impressions, clicks, spend, acos, roas, sales, orders} }
+function getAdForWeek(sqpWeek){
+  if(!adData.length) return {};
+  const [y,m,d] = sqpWeek.split('-').map(Number);
+  const start = new Date(Date.UTC(y, m-1, d));
+  const end = new Date(start); end.setUTCDate(end.getUTCDate()+6);
+  const map = {};
+  adData.forEach(r=>{
+    const [ry,rm,rd] = (r.date||'').split('-').map(Number);
+    if(!ry) return;
+    const rdate = new Date(Date.UTC(ry, rm-1, rd));
+    if(rdate < start || rdate > end) return;
+    if(!map[r.keyword]) map[r.keyword] = {impressions:0, clicks:0, spend:0, sales:0, orders:0};
+    map[r.keyword].impressions += r.impressions;
+    map[r.keyword].clicks += r.clicks;
+    map[r.keyword].spend += r.spend;
+    map[r.keyword].sales += r.sales;
+    map[r.keyword].orders += r.orders;
+  });
+  Object.values(map).forEach(v=>{
+    v.acos = v.sales>0 ? (v.spend/v.sales*100) : null;
+    v.roas = v.spend>0 ? (v.sales/v.spend) : null;
+  });
+  return map;
+}
+function findAdForKeyword(kw, adMap){
+  // 정확히 일치하거나, 광고 키워드가 SQP 키워드를 포함/부분일치하는 경우까지 완화 매칭
+  if(adMap[kw]) return adMap[kw];
+  const k = kw.toLowerCase();
+  const matchKey = Object.keys(adMap).find(ak=>ak===k || k.includes(ak) || ak.includes(k));
+  return matchKey ? adMap[matchKey] : null;
+}
+function adCellHtml(ad){
+  if(!ad) return '<td class="num" style="color:var(--text-dim)" colspan="3">–</td>';
+  const acosStr = ad.acos!==null ? ad.acos.toFixed(1)+'%' : '–';
+  const roasStr = ad.roas!==null ? ad.roas.toFixed(2) : '–';
+  const acosColor = ad.acos!==null ? (ad.acos>50?'var(--red)':ad.acos<20?'var(--green)':'var(--text)') : 'var(--text-dim)';
+  const roasColor = ad.roas!==null ? (ad.roas>3?'var(--green)':ad.roas<1?'var(--red)':'var(--text)') : 'var(--text-dim)';
+  return `<td class="num" style="color:var(--text-muted)">$${ad.spend.toFixed(0)}</td>
+    <td class="num" style="color:${acosColor}">${acosStr}</td>
+    <td class="num" style="color:${roasColor}">${roasStr}</td>`;
+}
 
 </script>
 </body>

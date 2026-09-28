@@ -551,6 +551,7 @@ function weeklyTable(data, week){
     const ad = hasAd ? findAdForKeyword(d.keyword,adMap) : null;
     const adImp = ad ? ad.impressions : 0;
     const organicImp = ad ? Math.max(0, d.impressions - adImp) : null;
+    const organicCapped = ad && adImp >= d.impressions; // 광고 노출이 SQP 노출과 같거나 커서 계산상 0으로 눌린 경우
     return `<tr>
     <td><span class="rank-badge ${i<3?'top3':''}">${d.rank||i+1}</span></td>
     <td class="kw ${isBrand(d.keyword)?'brand-kw':''}">${d.keyword}</td>
@@ -559,7 +560,7 @@ function weeklyTable(data, week){
     <td class="num">${d.impShare.toFixed(2)}%</td>
     ${hasAd?`
     <td class="num" style="color:var(--text-dim)">${ad?adImp.toLocaleString():'–'}</td>
-    <td class="num" style="color:var(--accent);font-weight:600">${organicImp!==null?organicImp.toLocaleString():'–'}</td>
+    <td class="num" style="color:${organicCapped?'var(--text-dim)':'var(--accent)'};font-weight:600"${organicCapped?' title="광고 노출('+adImp.toLocaleString()+')이 SQP 전체 노출과 같거나 커서 오가닉을 구분할 수 없음 (집계 기준 차이)"':''}>${organicImp!==null?(organicCapped?'0*':organicImp.toLocaleString()):'–'}</td>
     `:''}
     <td class="num">${d.clicks.toLocaleString()}</td>
     <td class="num">${d.clickShare.toFixed(2)}%</td>
@@ -629,7 +630,8 @@ function renderCompare(){
         💡 <strong>노출 증가율</strong>이 <strong>검색량 증가율</strong>보다 높으면 우리 랭킹/광고 경쟁력이 개선된 것이고, 비슷하거나 낮으면 시장 자체가 커진 영향이 커요.
       </div>`:''}
       ${hasAdCmp?`<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
-        📢 <strong>노출을 광고분/오가닉분으로 분리</strong>했어요 (SQP 전체 노출 − 광고 노출 = 오가닉 노출 추정치). 오가닉 노출이 늘면 랭킹 개선, 광고 노출만 늘면 광고 집행 확대가 원인이에요. 광고비/ACOS/ROAS는 ${formatWeek(w2)} 주차 기준이에요.
+        📢 <strong>노출을 광고분/오가닉분으로 분리</strong>했어요 (SQP 전체 노출 − 광고 노출 = 오가닉 노출 추정치). 오가닉 노출이 늘면 랭킹 개선, 광고 노출만 늘면 광고 집행 확대가 원인이에요. 광고비/ACOS/ROAS는 ${formatWeek(w2)} 주차 기준이에요.<br>
+        <span style="color:var(--text-dim)">※ 오가닉이 <strong>0*</strong>로 표시되면 실제로 0이 아니라, 광고 노출이 SQP 전체 노출과 같거나 커서 오가닉을 구분할 수 없는 경우예요 (두 데이터의 집계 기준 차이).</span>
       </div>`:''}
       <div class="table-wrap">
         <table><thead><tr>
@@ -656,7 +658,8 @@ function renderCompare(){
           const adImp2 = ad2 ? ad2.impressions : 0;
           const organic1 = (r1 && hasAdCmp) ? Math.max(0, r1.impressions - adImp1) : null;
           const organic2 = (r2 && hasAdCmp) ? Math.max(0, r2.impressions - adImp2) : null;
-          const organicC = (organic1!==null && organic2!==null) ? pct(organic2, organic1) : null;
+          const organic2Capped = r2 && hasAdCmp && adImp2 >= r2.impressions;
+          const organicC = (organic1!==null && organic2!==null && !organic2Capped) ? pct(organic2, organic1) : null;
 
           // 노출 증가율이 검색량 증가율보다 유의미하게 높으면 경쟁력 개선 표시
           let gapBadge='';
@@ -689,7 +692,7 @@ function renderCompare(){
             <td class="num">${r2?r2.impShare.toFixed(2)+'%':'–'}</td>
             ${hasAdCmp?`
             <td class="num" style="color:var(--text-dim)">${organic1!==null?organic1.toLocaleString():'–'}</td>
-            <td class="num" style="color:var(--accent);font-weight:600">${organic2!==null?organic2.toLocaleString():'–'}</td>
+            <td class="num" style="color:${organic2Capped?'var(--text-dim)':'var(--accent)'};font-weight:600"${organic2Capped?' title="광고 노출('+adImp2.toLocaleString()+')이 SQP 전체 노출과 같거나 커서 오가닉을 구분할 수 없음 (집계 기준 차이)"':''}>${organic2!==null?(organic2Capped?'0*':organic2.toLocaleString()):'–'}</td>
             <td class="num"><span class="chg ${clsV(organicC)}">${fmtPct(organicC)}</span></td>
             <td class="num" style="color:var(--text-dim)">${adImp2?adImp2.toLocaleString():'–'}</td>
             `:''}

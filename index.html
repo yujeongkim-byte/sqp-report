@@ -1763,11 +1763,9 @@ function getAdForWeek(sqpWeek){
   return map;
 }
 function findAdForKeyword(kw, adMap){
-  // 정확히 일치하거나, 광고 키워드가 SQP 키워드를 포함/부분일치하는 경우까지 완화 매칭
-  if(adMap[kw]) return adMap[kw];
-  const k = kw.toLowerCase();
-  const matchKey = Object.keys(adMap).find(ak=>ak===k || k.includes(ak) || ak.includes(k));
-  return matchKey ? adMap[matchKey] : null;
+  // 정확히 일치하는 경우만 매칭 (부분일치는 서로 다른 키워드에 같은 광고비가
+  // 중복 표시되는 오류를 유발하므로 사용하지 않음). 매칭 안 되면 null → 화면에 '–'로 표시.
+  return adMap[kw.toLowerCase().trim()] || null;
 }
 function adCellHtml(ad, adPrev){
   if(!ad) return '<td class="num" style="color:var(--text-dim)" colspan="3">–</td>';

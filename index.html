@@ -101,6 +101,7 @@
 .spinner-inline{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
 @keyframes spin{to{transform:rotate(360deg);}}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -174,10 +175,12 @@
           <div class="section-title">📢 SP 내부광고 키워드 CSV 업로드 <span style="font-weight:400;color:var(--text-dim);text-transform:none;font-size:10px">(선택 — SQP와 주차·키워드 매칭되어 광고비/ACOS/ROAS 함께 표시)</span></div>
           <div class="upload-zone" id="ad-drop-zone" onclick="document.getElementById('ad-csv-input').click()" ondragover="handleAdDrag(event,true)" ondragleave="handleAdDrag(event,false)" ondrop="handleAdDrop(event)">
             <div style="font-size:24px;margin-bottom:8px">📢</div>
-            <p><strong>SP Targeting Report CSV 업로드</strong><br>클릭하거나 드래그&드롭<br><br>
-            ✅ Date / Targeting / Impressions / Clicks / Spend / ACOS / ROAS / Orders 컬럼 포함 원본</p>
+            <p><strong>SP/SB 광고 리포트 업로드</strong><br>클릭하거나 드래그&드롭<br><br>
+            ✅ CSV, XLSX 모두 지원 (Sponsored Products / Sponsored Brands)<br>
+            ✅ Keyword Report, Search term Report 모두 가능<br>
+            ✅ Date / Targeting(또는 Customer Search Term) / Impressions / Spend / ACOS / ROAS / Orders 포함 원본</p>
           </div>
-          <input type="file" id="ad-csv-input" accept=".csv,.tsv,.txt" multiple onchange="handleAdFiles(this.files)">
+          <input type="file" id="ad-csv-input" accept=".csv,.tsv,.txt,.xlsx,.xls" multiple onchange="handleAdFiles(this.files)">
           <div id="ad-upload-log" style="margin-top:10px;font-size:12px;color:var(--text-muted);line-height:1.8"></div>
         </div>
       </div>
@@ -1504,31 +1507,33 @@ function adLog(msg){
 }
 function handleAdDrag(e,over){ e.preventDefault(); document.getElementById('ad-drop-zone').classList.toggle('drag',over); }
 function handleAdDrop(e){ e.preventDefault(); document.getElementById('ad-drop-zone').classList.remove('drag'); handleAdFiles(e.dataTransfer.files); }
-function handleAdFiles(files){ Array.from(files).forEach(f=>{ const r=new FileReader(); r.onload=e=>parseAdCSV(e.target.result,f.name); r.readAsText(f,'UTF-8'); }); }
 
-// ASIN/자동타겟팅(close-match, loose-match, substitutes, complements 등) 제외 — 실제 키워드만 채택
-function isRealKeyword(t){
-  const s = t.toLowerCase().trim();
-  if(!s) return false;
-  if(s.startsWith('asin=')) return false;
-  if(['close-match','loose-match','substitutes','complements'].includes(s)) return false;
-  return true;
+function handleAdFiles(files){
+  Array.from(files).forEach(f=>{
+    const ext = f.name.toLowerCase().split('.').pop();
+    if(ext==='xlsx' || ext==='xls'){
+      const r = new FileReader();
+      r.onload = e => parseAdWorkbook(e.target.result, f.name);
+      r.readAsArrayBuffer(f);
+    } else {
+      const r = new FileReader();
+      r.onload = e => parseAdRows(textToRows(e.target.result), f.name);
+      r.readAsText(f, 'UTF-8');
+    }
+  });
 }
 
-async function parseAdCSV(text, filename){
+// CSV/TSV 텍스트를 2차원 배열로 변환 (헤더 행 자동 탐색 포함)
+function textToRows(text){
   text = text.replace(/^\uFEFF/,'');
   const allLines = text.split('\n').map(l=>l.trim()).filter(l=>l.replace(/,/g,'').trim().length>0);
-  if(allLines.length<2){ adLog('❌ '+filename+': 데이터 부족'); return; }
-
-  // 헤더 행 자동 탐색 (Date, Targeting 등이 포함된 행)
   let headerIdx = -1;
   for(let i=0;i<Math.min(10,allLines.length);i++){
     if(allLines[i].includes('Targeting') && (allLines[i].includes('Date')||allLines[i].includes('Impressions'))){
       headerIdx = i; break;
     }
   }
-  if(headerIdx<0){ adLog('❌ '+filename+': 헤더 행을 찾을 수 없음 (Date/Targeting 컬럼 필요)'); return; }
-
+  if(headerIdx<0) return null;
   const lines = allLines.slice(headerIdx);
   const delim = lines[0].includes('\t') ? '\t' : ',';
   function splitRow(line){
@@ -1540,26 +1545,93 @@ async function parseAdCSV(text, filename){
     }
     res.push(cur.trim()); return res;
   }
-  const headers = splitRow(lines[0]);
+  return lines.map(l=>splitRow(l));
+}
+
+// XLSX(엑셀) 파일 → 2차원 배열로 변환 후 공통 파서로 전달
+function parseAdWorkbook(arrayBuffer, filename){
+  try {
+    const wb = XLSX.read(arrayBuffer, {type:'array', cellDates:true});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''});
+    // 헤더 행 자동 탐색 (Date, Targeting/Impressions 포함된 행)
+    let headerIdx=-1;
+    for(let i=0;i<Math.min(10,rows.length);i++){
+      const rowStr = (rows[i]||[]).join(' ');
+      if(rowStr.includes('Targeting') && (rowStr.includes('Date')||rowStr.includes('Impressions'))){
+        headerIdx=i; break;
+      }
+    }
+    if(headerIdx<0){ adLog('❌ '+filename+': 헤더 행을 찾을 수 없음'); return; }
+    parseAdRows(rows.slice(headerIdx), filename);
+  } catch(e){
+    adLog('❌ '+filename+': 엑셀 파일 읽기 실패 — '+e.message);
+  }
+}
+
+// 엑셀 날짜(Date 객체 또는 시리얼 넘버) / 텍스트 날짜를 YYYY-MM-DD로 통일
+function toDateStr(v){
+  if(v instanceof Date){
+    const y=v.getUTCFullYear(), m=String(v.getUTCMonth()+1).padStart(2,'0'), d=String(v.getUTCDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  }
+  if(typeof v==='number'){
+    // 엑셀 시리얼 날짜(1900 날짜 시스템)
+    const ms = Math.round((v-25569)*86400*1000);
+    const dt = new Date(ms);
+    const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  }
+  if(typeof v==='string') return normalizeWeek(v);
+  return '';
+}
+
+// ASIN/자동타겟팅(close-match, loose-match, substitutes, complements 등) 제외 — 실제 키워드만 채택
+function isRealKeyword(t){
+  const s = String(t).toLowerCase().trim();
+  if(!s) return false;
+  if(s.startsWith('asin=')) return false;
+  if(['close-match','loose-match','substitutes','complements'].includes(s)) return false;
+  return true;
+}
+
+// CSV/XLSX 공통: 2차원 배열(rows[0]=헤더, rows[1..]=데이터)을 받아 adData에 반영
+async function parseAdRows(rows, filename){
+  if(!rows || rows.length<2){ adLog('❌ '+filename+': 데이터 부족 또는 헤더 인식 실패'); return; }
+  const headers = rows[0].map(h=>String(h||''));
   const find = (...keys)=>{
     for(const k of keys){ const i=headers.findIndex(h=>h.toLowerCase().includes(k.toLowerCase())); if(i>=0) return i; }
     return -1;
   };
-  const iDate=find('Date'), iTarget=find('Targeting'), iImp=find('Impressions'),
-        iClk=find('Clicks'), iSpend=find('Spend'), iAcos=find('ACOS'), iRoas=find('ROAS'),
-        iSales=find('7 Day Total Sales','Total Sales'), iOrders=find('7 Day Total Orders','Total Orders');
+  const iDate=find('Date');
+  // Search term 리포트는 실제 검색어(Customer Search Term)를 우선 사용, 없으면 Targeting
+  const iSearchTerm=find('Customer Search Term');
+  const iTarget=find('Targeting');
+  const iKwCol = iSearchTerm>=0 ? iSearchTerm : iTarget;
+  const iImp=find('Impressions'), iClk=find('Clicks'), iSpend=find('Spend'),
+        iAcos=find('ACOS'), iRoas=find('ROAS'),
+        iSales=find('14 Day Total Sales','7 Day Total Sales','Total Sales'),
+        iOrders=find('14 Day Total Orders','7 Day Total Orders','Total Orders');
+
+  if(iKwCol<0 || iDate<0){ adLog('❌ '+filename+': Date 또는 키워드(Targeting/Customer Search Term) 컬럼을 찾을 수 없음'); return; }
 
   let added=0, skipped=0;
-  for(let i=1;i<lines.length;i++){
-    const cols = splitRow(lines[i]);
-    if(cols.length<3) continue;
-    const dateStr = iDate>=0?cols[iDate]:'';
-    const target = iTarget>=0?cols[iTarget]:'';
-    if(!dateStr || !target || !isRealKeyword(target)){ skipped++; continue; }
-    const pn = idx=>{ if(idx<0||idx>=cols.length||!cols[idx]) return 0; return parseFloat(cols[idx].replace(/[,$%]/g,''))||0; };
-    const week = normalizeWeek(dateStr);
+  for(let i=1;i<rows.length;i++){
+    const cols = rows[i];
+    if(!cols || cols.length<3) continue;
+    const dateRaw = cols[iDate];
+    const target = cols[iKwCol];
+    if(!dateRaw || !target || !isRealKeyword(target)){ skipped++; continue; }
+    const pn = idx=>{
+      if(idx<0||idx>=cols.length||cols[idx]===''||cols[idx]==null) return 0;
+      const v = cols[idx];
+      if(typeof v==='number') return v;
+      return parseFloat(String(v).replace(/[,$%]/g,''))||0;
+    };
+    const week = toDateStr(dateRaw);
+    if(!week){ skipped++; continue; }
     const row = {
-      date: week, keyword: target.toLowerCase().trim(),
+      date: week, keyword: String(target).toLowerCase().trim(),
       impressions: pn(iImp), clicks: pn(iClk), spend: pn(iSpend),
       acos: pn(iAcos), roas: pn(iRoas), sales: pn(iSales), orders: pn(iOrders)
     };
@@ -1568,7 +1640,8 @@ async function parseAdCSV(text, filename){
   }
   await saveAdToStorage();
   updateAdCount();
-  adLog(`✅ ${filename}: ${added}개 행 추가, ${skipped}개 건너뜀 (ASIN/자동타겟팅 제외) | 총 누적 ${adData.length}행`);
+  const kwColName = iSearchTerm>=0 ? 'Customer Search Term' : 'Targeting';
+  adLog(`✅ ${filename}: ${added}개 행 추가 (${kwColName} 기준), ${skipped}개 건너뜀 | 총 누적 ${adData.length}행`);
 }
 
 // SQP 주차(week: YYYY-MM-DD, 그 주 시작일)에 해당하는 7일 범위의 광고 데이터를

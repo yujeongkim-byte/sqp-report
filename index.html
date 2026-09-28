@@ -535,6 +535,9 @@ function weeklyTable(data, week){
   const hasVol = data.some(d=>d.searchVolume>0);
   const adMap = (adData.length && week) ? getAdForWeek(week) : {};
   const hasAd = Object.keys(adMap).length>0;
+  const wkIdx = weeks.indexOf(week);
+  const prevWk = wkIdx>0 ? weeks[wkIdx-1] : null;
+  const adMapPrevW = (adData.length && prevWk) ? getAdForWeek(prevWk) : {};
   const head=`<thead><tr>
     <th>순위</th><th>키워드</th>
     ${hasVol?'<th style="text-align:right">전체 검색량</th>':''}
@@ -563,7 +566,7 @@ function weeklyTable(data, week){
     <td class="num">${d.cart}</td>
     <td class="num"><strong>${d.purchases}</strong></td>
     <td class="num" style="color:${cvrColor(d.cvr)}">${d.cvr.toFixed(2)}%</td>
-    ${hasAd?adCellHtml(ad):''}
+    ${hasAd?adCellHtml(ad, findAdForKeyword(d.keyword,adMapPrevW)):''}
   </tr>`;
   }).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
@@ -609,13 +612,16 @@ function renderCompare(){
   const adMap1 = adData.length ? getAdForWeek(w1) : {};
   const adMap2 = adData.length ? getAdForWeek(w2) : {};
   const hasAdCmp = Object.keys(adMap2).length>0 || Object.keys(adMap1).length>0;
+  const spendTot1 = Object.values(adMap1).reduce((s,v)=>s+v.spend,0);
+  const spendTot2 = Object.values(adMap2).reduce((s,v)=>s+v.spend,0);
 
   document.getElementById('compare-content').innerHTML=`
-    <div class="kpi-row">
+    <div class="kpi-row" style="${hasAdCmp?'grid-template-columns:repeat(5,1fr)':''}">
       ${cmpKpi('노출',fmtNum(t1.impressions),fmtNum(t2.impressions),pct(t2.impressions,t1.impressions))}
       ${cmpKpi('클릭',fmtNum(t1.clicks),fmtNum(t2.clicks),pct(t2.clicks,t1.clicks))}
       ${cmpKpi('구매',t1.purchases,t2.purchases,pct(t2.purchases,t1.purchases))}
       ${cmpKpi('전환율',t1.cvr.toFixed(2)+'%',t2.cvr.toFixed(2)+'%',t2.cvr-t1.cvr,true)}
+      ${hasAdCmp?cmpKpi('광고비(SP+SB)','$'+spendTot1.toFixed(0),'$'+spendTot2.toFixed(0),pct(spendTot2,spendTot1)):''}
     </div>
     <div class="section">
       <div class="section-title">키워드별 비교 <span style="font-size:10px;font-weight:400;color:var(--text-dim);text-transform:none">${formatWeek(w1)} → ${formatWeek(w2)}</span></div>
@@ -695,7 +701,7 @@ function renderCompare(){
             <td class="num" style="color:${r1?cvrColor(r1.cvr):'var(--text-dim)'}">${r1?r1.cvr.toFixed(2)+'%':'–'}</td>
             <td class="num" style="color:${r2?cvrColor(r2.cvr):'var(--text-dim)'}">${r2?r2.cvr.toFixed(2)+'%':'–'}</td>
             <td style="font-size:11px">${status}</td>
-            ${hasAdCmp?adCellHtml(ad2):''}
+            ${hasAdCmp?adCellHtml(ad2, ad1):''}
           </tr>`;
         }).join('')}
         </tbody></table>
@@ -780,6 +786,11 @@ function generateInsight(){
   const newKws=data.filter(d=>!prevData.find(p=>p.keyword===d.keyword));
   const exitKws=prevData.filter(p=>!data.find(d=>d.keyword===p.keyword));
 
+  // 오가닉/광고 노출 분리용 광고 데이터 (해당 주차 · 전주)
+  const adMapCur = (typeof adData!=='undefined' && adData.length) ? getAdForWeek(week) : {};
+  const adMapPrev = (typeof adData!=='undefined' && adData.length && prevWeek) ? getAdForWeek(prevWeek) : {};
+  const hasAdInsight = Object.keys(adMapCur).length>0 || Object.keys(adMapPrev).length>0;
+
   // 헬퍼
   const arrow=(v)=>v>0?'▲':v<0?'▼':'─';
   const clrC=(v)=>v>0?'var(--green)':v<0?'var(--red)':'var(--text-muted)';
@@ -789,6 +800,26 @@ function generateInsight(){
     return `<span style="color:${clrC(v)}">${arrow(v)} ${s}</span>`;
   };
   const kw=(d)=>`<strong style="color:${isBrand(d.keyword)?'var(--accent)':'var(--text)'}">${d.keyword}</strong>`;
+
+  // 노출 증감의 원인이 랭킹(오가닉)인지 광고인지 짧은 문구로 반환
+  function impCauseText(keyword, curImp, prevImp){
+    if(!hasAdInsight) return '';
+    const adCur = findAdForKeyword(keyword, adMapCur);
+    const adPrev = findAdForKeyword(keyword, adMapPrev);
+    const adImpCur = adCur ? adCur.impressions : 0;
+    const adImpPrev = adPrev ? adPrev.impressions : 0;
+    const orgCur = Math.max(0, curImp - adImpCur);
+    const orgPrev = Math.max(0, prevImp - adImpPrev);
+    const orgC = pct(orgCur, orgPrev);
+    if(orgC===null) return '';
+    const adGrew = adImpCur > adImpPrev * 1.15;
+    const adShrank = adImpCur < adImpPrev * 0.85;
+    if(orgC>=15 && !adGrew) return ' (오가닉 노출 '+(orgC>=0?'+':'')+orgC.toFixed(0)+'% — 랭킹 개선 영향)';
+    if(orgC<=-15 && !adShrank) return ' (오가닉 노출 '+orgC.toFixed(0)+'% — 랭킹 하락 영향)';
+    if(adGrew && Math.abs(orgC)<15) return ' (오가닉은 안정적, 광고 노출 확대가 원인)';
+    if(adShrank && Math.abs(orgC)<15) return ' (오가닉은 안정적, 광고 노출 축소가 원인)';
+    return '';
+  }
 
   // ── 키워드별 분석 문장 생성 ──
   function kwLines(arr){
@@ -804,9 +835,9 @@ function generateInsight(){
         const cvrC=d.cvr-p.cvr;
         const purC=pct(d.purchases,p.purchases);
 
-        // 노출 변화
-        if(Math.abs(impC)>=30) msgs.push(`노출 ${impC>0?'+':''}${impC.toFixed(0)}% ${impC>0?'급증':'급감'} (${p.impressions.toLocaleString()} → ${d.impressions.toLocaleString()})`);
-        else if(Math.abs(impC)>=10) msgs.push(`노출 ${impC>0?'+':''}${impC.toFixed(0)}% ${impC>0?'증가':'감소'}`);
+        // 노출 변화 (+ 오가닉/광고 원인)
+        if(Math.abs(impC)>=30) msgs.push(`노출 ${impC>0?'+':''}${impC.toFixed(0)}% ${impC>0?'급증':'급감'} (${p.impressions.toLocaleString()} → ${d.impressions.toLocaleString()})${impCauseText(d.keyword,d.impressions,p.impressions)}`);
+        else if(Math.abs(impC)>=10) msgs.push(`노출 ${impC>0?'+':''}${impC.toFixed(0)}% ${impC>0?'증가':'감소'}${impCauseText(d.keyword,d.impressions,p.impressions)}`);
 
         // 구매+전환율 복합 판단
         if(purC!==null){
@@ -1729,15 +1760,38 @@ function findAdForKeyword(kw, adMap){
   const matchKey = Object.keys(adMap).find(ak=>ak===k || k.includes(ak) || ak.includes(k));
   return matchKey ? adMap[matchKey] : null;
 }
-function adCellHtml(ad){
+function adCellHtml(ad, adPrev){
   if(!ad) return '<td class="num" style="color:var(--text-dim)" colspan="3">–</td>';
   const acosStr = ad.acos!==null ? ad.acos.toFixed(1)+'%' : '–';
   const roasStr = ad.roas!==null ? ad.roas.toFixed(2) : '–';
   const acosColor = ad.acos!==null ? (ad.acos>50?'var(--red)':ad.acos<20?'var(--green)':'var(--text)') : 'var(--text-dim)';
   const roasColor = ad.roas!==null ? (ad.roas>3?'var(--green)':ad.roas<1?'var(--red)':'var(--text)') : 'var(--text-dim)';
-  return `<td class="num" style="color:var(--text-muted)">$${ad.spend.toFixed(0)}</td>
-    <td class="num" style="color:${acosColor}">${acosStr}</td>
-    <td class="num" style="color:${roasColor}">${roasStr}</td>`;
+
+  // 전주 대비 증감 (광고비: %변화, ACOS: %p변화(낮을수록 좋음→반대색), ROAS: %p변화(높을수록 좋음))
+  let spendChg='', acosChg='', roasChg='';
+  if(adPrev){
+    const spendPct = adPrev.spend>0 ? (ad.spend-adPrev.spend)/adPrev.spend*100 : null;
+    if(spendPct!==null){
+      const c = spendPct>0?'var(--green)':spendPct<0?'var(--red)':'var(--text-dim)';
+      spendChg = ` <span style="font-size:9px;color:${c}">(${spendPct>=0?'+':''}${spendPct.toFixed(0)}%)</span>`;
+    }
+    if(ad.acos!==null && adPrev.acos!==null){
+      const d = ad.acos-adPrev.acos;
+      // ACOS는 낮을수록 좋으므로 감소(개선)를 초록, 증가(악화)를 빨강으로 표시
+      const c = d<0?'var(--green)':d>0?'var(--red)':'var(--text-dim)';
+      acosChg = ` <span style="font-size:9px;color:${c}">(${d>=0?'+':''}${d.toFixed(1)}%p)</span>`;
+    }
+    if(ad.roas!==null && adPrev.roas!==null){
+      const d = ad.roas-adPrev.roas;
+      // ROAS는 높을수록 좋으므로 증가를 초록, 감소를 빨강으로 표시
+      const c = d>0?'var(--green)':d<0?'var(--red)':'var(--text-dim)';
+      roasChg = ` <span style="font-size:9px;color:${c}">(${d>=0?'+':''}${d.toFixed(2)})</span>`;
+    }
+  }
+
+  return `<td class="num" style="color:var(--text-muted)">$${ad.spend.toFixed(0)}${spendChg}</td>
+    <td class="num" style="color:${acosColor}">${acosStr}${acosChg}</td>
+    <td class="num" style="color:${roasColor}">${roasStr}${roasChg}</td>`;
 }
 
 </script>

@@ -539,23 +539,33 @@ function weeklyTable(data, week){
     <th>순위</th><th>키워드</th>
     ${hasVol?'<th style="text-align:right">전체 검색량</th>':''}
     <th style="text-align:right">노출</th><th style="text-align:right">노출점유율</th>
+    ${hasAd?'<th style="text-align:right">└광고 노출</th><th style="text-align:right">└오가닉 노출</th>':''}
     <th style="text-align:right">클릭</th><th style="text-align:right">클릭점유율</th>
     <th style="text-align:right">장바구니</th><th style="text-align:right">구매</th><th style="text-align:right">전환율</th>
     ${hasAd?'<th style="text-align:right">광고비</th><th style="text-align:right">ACOS</th><th style="text-align:right">ROAS</th>':''}
   </tr></thead>`;
-  const body=data.map((d,i)=>`<tr>
+  const body=data.map((d,i)=>{
+    const ad = hasAd ? findAdForKeyword(d.keyword,adMap) : null;
+    const adImp = ad ? ad.impressions : 0;
+    const organicImp = ad ? Math.max(0, d.impressions - adImp) : null;
+    return `<tr>
     <td><span class="rank-badge ${i<3?'top3':''}">${d.rank||i+1}</span></td>
     <td class="kw ${isBrand(d.keyword)?'brand-kw':''}">${d.keyword}</td>
     ${hasVol?`<td class="num" style="color:var(--text-muted)">${d.searchVolume?d.searchVolume.toLocaleString():'–'}</td>`:''}
     <td class="num">${d.impressions.toLocaleString()}</td>
     <td class="num">${d.impShare.toFixed(2)}%</td>
+    ${hasAd?`
+    <td class="num" style="color:var(--text-dim)">${ad?adImp.toLocaleString():'–'}</td>
+    <td class="num" style="color:var(--accent);font-weight:600">${organicImp!==null?organicImp.toLocaleString():'–'}</td>
+    `:''}
     <td class="num">${d.clicks.toLocaleString()}</td>
     <td class="num">${d.clickShare.toFixed(2)}%</td>
     <td class="num">${d.cart}</td>
     <td class="num"><strong>${d.purchases}</strong></td>
     <td class="num" style="color:${cvrColor(d.cvr)}">${d.cvr.toFixed(2)}%</td>
-    ${hasAd?adCellHtml(findAdForKeyword(d.keyword,adMap)):''}
-  </tr>`).join('');
+    ${hasAd?adCellHtml(ad):''}
+  </tr>`;
+  }).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
 
@@ -596,8 +606,9 @@ function renderCompare(){
     .sort((a,b)=>(b.r2?b.r2.purchases:0)-(a.r2?a.r2.purchases:0));
 
   const hasVolCmp = [...d1,...d2].some(d=>d.searchVolume>0);
+  const adMap1 = adData.length ? getAdForWeek(w1) : {};
   const adMap2 = adData.length ? getAdForWeek(w2) : {};
-  const hasAdCmp = Object.keys(adMap2).length>0;
+  const hasAdCmp = Object.keys(adMap2).length>0 || Object.keys(adMap1).length>0;
 
   document.getElementById('compare-content').innerHTML=`
     <div class="kpi-row">
@@ -612,13 +623,14 @@ function renderCompare(){
         💡 <strong>노출 증가율</strong>이 <strong>검색량 증가율</strong>보다 높으면 우리 랭킹/광고 경쟁력이 개선된 것이고, 비슷하거나 낮으면 시장 자체가 커진 영향이 커요.
       </div>`:''}
       ${hasAdCmp?`<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
-        📢 <strong>광고비/ACOS/ROAS</strong>는 ${formatWeek(w2)} 주차 기준 SP 광고 데이터가 매칭된 값이에요.
+        📢 <strong>노출을 광고분/오가닉분으로 분리</strong>했어요 (SQP 전체 노출 − 광고 노출 = 오가닉 노출 추정치). 오가닉 노출이 늘면 랭킹 개선, 광고 노출만 늘면 광고 집행 확대가 원인이에요. 광고비/ACOS/ROAS는 ${formatWeek(w2)} 주차 기준이에요.
       </div>`:''}
       <div class="table-wrap">
         <table><thead><tr>
           <th>키워드</th>
           ${hasVolCmp?'<th style="text-align:right">검색량(전)</th><th style="text-align:right">검색량(후)</th><th style="text-align:right">검색량%</th>':''}
           <th style="text-align:right">노출(전)</th><th style="text-align:right">노출(후)</th><th style="text-align:right">노출%</th><th style="text-align:right">노출점유율(후)</th>
+          ${hasAdCmp?'<th style="text-align:right">오가닉(전)</th><th style="text-align:right">오가닉(후)</th><th style="text-align:right">오가닉%</th><th style="text-align:right">광고노출(후)</th>':''}
           <th style="text-align:right">클릭(후)</th><th style="text-align:right">클릭점유율(후)</th>
           <th style="text-align:right">장바구니(후)</th>
           <th style="text-align:right">구매(전)</th><th style="text-align:right">구매(후)</th>
@@ -630,6 +642,16 @@ function renderCompare(){
           const vc=r1&&r2&&r1.searchVolume&&r2.searchVolume?pct(r2.searchVolume,r1.searchVolume):null;
           const pc=r1&&r2?pct(r2.purchases,r1.purchases):null;
           const status=!r1?'🆕 신규':!r2?'❌ 이탈':'';
+
+          // 오가닉/광고 노출 분리
+          const ad1 = hasAdCmp ? findAdForKeyword(kw,adMap1) : null;
+          const ad2 = hasAdCmp ? findAdForKeyword(kw,adMap2) : null;
+          const adImp1 = ad1 ? ad1.impressions : 0;
+          const adImp2 = ad2 ? ad2.impressions : 0;
+          const organic1 = (r1 && hasAdCmp) ? Math.max(0, r1.impressions - adImp1) : null;
+          const organic2 = (r2 && hasAdCmp) ? Math.max(0, r2.impressions - adImp2) : null;
+          const organicC = (organic1!==null && organic2!==null) ? pct(organic2, organic1) : null;
+
           // 노출 증가율이 검색량 증가율보다 유의미하게 높으면 경쟁력 개선 표시
           let gapBadge='';
           if(ic!==null&&vc!==null){
@@ -637,8 +659,19 @@ function renderCompare(){
             if(gap>=15) gapBadge=' <span style="font-size:9px;color:var(--green);background:rgba(18,169,112,0.1);padding:1px 5px;border-radius:3px" title="검색량 대비 노출 증가율이 더 큼 — 경쟁력 개선">↑경쟁력</span>';
             else if(gap<=-15) gapBadge=' <span style="font-size:9px;color:var(--red);background:rgba(224,61,61,0.1);padding:1px 5px;border-radius:3px" title="검색량 대비 노출 증가율이 더 낮음 — 점유율 하락">↓점유율</span>';
           }
+          // 랭킹(오가닉) vs 광고 원인 판단 뱃지
+          let causeBadge='';
+          if(organicC!==null){
+            const adGrew = adImp2 > adImp1 * 1.15; // 광고 노출 15%+ 증가
+            const adShrank = adImp2 < adImp1 * 0.85;
+            if(organicC>=15 && !adGrew) causeBadge=' <span style="font-size:9px;color:var(--accent);background:rgba(59,108,255,0.1);padding:1px 5px;border-radius:3px" title="오가닉 노출 증가, 광고는 유지/감소 — 랭킹 개선 영향">📈랭킹개선</span>';
+            else if(organicC<=-15 && !adShrank) causeBadge=' <span style="font-size:9px;color:var(--red);background:rgba(224,61,61,0.1);padding:1px 5px;border-radius:3px" title="오가닉 노출 감소, 광고는 유지/증가 — 랭킹 하락 영향">📉랭킹하락</span>';
+            else if(adGrew && Math.abs(organicC)<15) causeBadge=' <span style="font-size:9px;color:var(--yellow);background:rgba(217,119,6,0.1);padding:1px 5px;border-radius:3px" title="오가닉은 안정적, 광고 노출만 증가 — 광고 집행 확대 영향">📢광고확대</span>';
+            else if(adShrank && Math.abs(organicC)<15) causeBadge=' <span style="font-size:9px;color:var(--text-dim);background:var(--surface2);padding:1px 5px;border-radius:3px" title="오가닉은 안정적, 광고 노출만 감소 — 광고 축소 영향">📢광고축소</span>';
+          }
+
           return `<tr>
-            <td class="kw ${isBrand(kw)?'brand-kw':''}" style="font-size:11px">${kw}${gapBadge}</td>
+            <td class="kw ${isBrand(kw)?'brand-kw':''}" style="font-size:11px">${kw}${gapBadge}${causeBadge}</td>
             ${hasVolCmp?`
             <td class="num" style="color:var(--text-muted)">${r1&&r1.searchVolume?r1.searchVolume.toLocaleString():'–'}</td>
             <td class="num" style="color:var(--text-muted)">${r2&&r2.searchVolume?r2.searchVolume.toLocaleString():'–'}</td>
@@ -648,6 +681,12 @@ function renderCompare(){
             <td class="num">${r2?r2.impressions.toLocaleString():'–'}</td>
             <td class="num"><span class="chg ${clsV(ic)}">${fmtPct(ic)}</span></td>
             <td class="num">${r2?r2.impShare.toFixed(2)+'%':'–'}</td>
+            ${hasAdCmp?`
+            <td class="num" style="color:var(--text-dim)">${organic1!==null?organic1.toLocaleString():'–'}</td>
+            <td class="num" style="color:var(--accent);font-weight:600">${organic2!==null?organic2.toLocaleString():'–'}</td>
+            <td class="num"><span class="chg ${clsV(organicC)}">${fmtPct(organicC)}</span></td>
+            <td class="num" style="color:var(--text-dim)">${adImp2?adImp2.toLocaleString():'–'}</td>
+            `:''}
             <td class="num">${r2?r2.clicks.toLocaleString():'–'}</td>
             <td class="num">${r2?r2.clickShare.toFixed(2)+'%':'–'}</td>
             <td class="num">${r2?r2.cart:'–'}</td>
@@ -656,7 +695,7 @@ function renderCompare(){
             <td class="num" style="color:${r1?cvrColor(r1.cvr):'var(--text-dim)'}">${r1?r1.cvr.toFixed(2)+'%':'–'}</td>
             <td class="num" style="color:${r2?cvrColor(r2.cvr):'var(--text-dim)'}">${r2?r2.cvr.toFixed(2)+'%':'–'}</td>
             <td style="font-size:11px">${status}</td>
-            ${hasAdCmp?adCellHtml(findAdForKeyword(kw,adMap2)):''}
+            ${hasAdCmp?adCellHtml(ad2):''}
           </tr>`;
         }).join('')}
         </tbody></table>

@@ -878,9 +878,11 @@ function generateInsight(){
     return top10cur.map(d=>{
       const p=top10prev.find(x=>x.keyword===d.keyword);
       const impC=p?pct(d.impressions,p.impressions):null;
+      const clkC=p?pct(d.clicks,p.clicks):null;
       const purC=p?pct(d.purchases,p.purchases):null;
       const cvrC=p?d.cvr-p.cvr:null;
       const impColor=impC!==null?(impC>0?'var(--green)':impC<0?'var(--red)':'var(--text-muted)'):'var(--text-muted)';
+      const clkColor=clkC!==null?(clkC>0?'var(--green)':clkC<0?'var(--red)':'var(--text-muted)'):'var(--text-muted)';
       const purColor=purC!==null?(purC>0?'var(--green)':purC<0?'var(--red)':'var(--text-muted)'):'var(--text-muted)';
       const cvrColor2=cvrC!==null?(cvrC>0?'var(--green)':cvrC<0?'var(--red)':'var(--text-muted)'):'var(--text-muted)';
       const isNew=!p;
@@ -889,6 +891,8 @@ function generateInsight(){
         <td style="padding:5px 8px;font-size:12px;font-weight:500;color:${isBrand(d.keyword)?'var(--accent)':'var(--text)'}">${d.keyword}${isNew?' <span style="font-size:9px;color:var(--green);background:rgba(18,169,112,0.1);padding:1px 5px;border-radius:3px">NEW</span>':''}</td>
         <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data)">${p?p.impressions.toLocaleString():'–'}</td>
         <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data);color:${impColor};font-weight:600">${d.impressions.toLocaleString()}${impC!==null?' ('+(impC>=0?'+':'')+impC.toFixed(0)+'%)':''}</td>
+        <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data)">${p?p.clicks.toLocaleString():'–'}</td>
+        <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data);color:${clkColor};font-weight:600">${d.clicks.toLocaleString()}${clkC!==null?' ('+(clkC>=0?'+':'')+clkC.toFixed(0)+'%)':''}</td>
         <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data)">${p?p.purchases:'–'}</td>
         <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data);color:${purColor};font-weight:600">${d.purchases}${purC!==null?' ('+(purC>=0?'+':'')+purC.toFixed(0)+'%)':''}</td>
         <td style="padding:5px 8px;font-size:11px;text-align:right;font-family:var(--font-data)">${p?p.cvr.toFixed(2)+'%':'–'}</td>
@@ -979,6 +983,8 @@ function generateInsight(){
               <th style="padding:5px 8px;text-align:left;color:var(--text-dim);font-weight:600">키워드</th>
               <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">노출(전)</th>
               <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">노출(후)</th>
+              <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">클릭(전)</th>
+              <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">클릭(후)</th>
               <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">구매(전)</th>
               <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">구매(후)</th>
               <th style="padding:5px 8px;text-align:right;color:var(--text-dim);font-weight:600">전환율(전)</th>

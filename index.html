@@ -100,6 +100,10 @@
   .kw-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .spinner-inline{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
 @keyframes spin{to{transform:rotate(360deg);}}
+.pin-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;transition:all .15s}
+.pin-btn:hover{background:var(--surface2);color:var(--text)}
+.pin-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.pin-leg{cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);user-select:none}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -218,6 +222,33 @@
 
       <!-- Trend -->
       <div id="page-trend" class="page">
+        <!-- 📌 고정 키워드 트렌드 -->
+        <div id="pinned-trend" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:20px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+            <div>
+              <div style="font-size:13px;font-weight:700">📌 고정 키워드 트렌드 <span style="font-weight:400;font-size:11px;color:var(--text-dim)">(9개 키워드 항상 표시)</span></div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.6">범례를 클릭하면 키워드를 숨기거나 다시 표시할 수 있어요. 값이 '–'이면 그 주차 SQP에 해당 키워드 행이 없는 거예요.</div>
+            </div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+              <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-muted);font-weight:600">지표</span>
+                <button class="pin-btn active" data-pin="metric" onclick="setPinned('metric','impressions',this)">노출</button>
+                <button class="pin-btn" data-pin="metric" onclick="setPinned('metric','clicks',this)">클릭</button>
+                <button class="pin-btn" data-pin="metric" onclick="setPinned('metric','purchases',this)">구매</button>
+                <button class="pin-btn" data-pin="metric" onclick="setPinned('metric','cvr',this)">전환율</button></div>
+              <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-muted);font-weight:600">기간</span>
+                <button class="pin-btn active" data-pin="range" onclick="setPinned('range',8,this)">8주</button>
+                <button class="pin-btn" data-pin="range" onclick="setPinned('range',12,this)">12주</button>
+                <button class="pin-btn" data-pin="range" onclick="setPinned('range','all',this)">전체</button></div>
+              <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-muted);font-weight:600">보기</span>
+                <button class="pin-btn active" data-pin="view" onclick="setPinned('view','combined',this)">한 그래프</button>
+                <button class="pin-btn" data-pin="view" onclick="setPinned('view','split',this)">키워드별 분리</button></div>
+            </div>
+          </div>
+          <div id="pinned-legend" style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-bottom:10px"></div>
+          <div id="pinned-chart"></div>
+          <div id="pinned-table" style="margin-top:14px"></div>
+        </div>
+
         <!-- 키워드 검색 & 선택 -->
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:16px">
           <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:0.8px;margin-bottom:10px">키워드 검색 <span style="font-weight:400;color:var(--text-dim)">(전체 키워드 대상, 복수 선택 가능)</span></div>
@@ -1120,7 +1151,152 @@ const CHART_COLORS = [
 const METRIC_LABELS = { impressions:'노출', purchases:'구매', cvr:'전환율', clicks:'클릭' };
 let trendState = { selectedKws: [], unit: 'week', selectedWeeks: [], metrics: ['impressions'] };
 
+// ══════════════════════════════════════════
+// 📌 고정 키워드 트렌드 (항상 표시)
+// ══════════════════════════════════════════
+const PINNED_KWS = [
+  'esther formula glutathione',
+  'esther formula',
+  'glutathione strips',
+  'lyuh esther glutathione',
+  'esther glutathione strips',
+  'esther glutathione',
+  'lyuh esther liposomal glutathione direct',
+  'esther formula liposomal glutathione strips',
+  'liposomal glutathione strips'
+];
+let pinnedState = { metric:'impressions', range:8, view:'combined', hidden:new Set() };
+
+function pinnedWeeks(){
+  const ws=[...weeks].sort();
+  return pinnedState.range==='all' ? ws : ws.slice(-pinnedState.range);
+}
+function pinnedVal(kw, week, metric){
+  const r=allData.find(d=>d.keyword===kw && d.week===week);
+  if(!r) return null;
+  return metric==='cvr' ? +Number(r.cvr).toFixed(2) : Number(r[metric])||0;
+}
+function pinnedFmt(v, metric){
+  if(v===null||v===undefined) return '–';
+  return metric==='cvr' ? v.toFixed(2)+'%' : Math.round(v).toLocaleString();
+}
+function pinnedChange(data, metric){
+  const n=data.length; if(n<2) return null;
+  const last=data[n-1], prev=data[n-2];
+  if(last===null||prev===null) return null;
+  if(metric==='cvr') return {txt:(last-prev>=0?'+':'')+(last-prev).toFixed(2)+'%p', v:last-prev};
+  if(prev===0) return null;
+  const p=(last-prev)/prev*100;
+  return {txt:(p>=0?'+':'')+p.toFixed(1)+'%', v:p};
+}
+function setPinned(key,val,btn){
+  pinnedState[key]=val;
+  document.querySelectorAll('[data-pin="'+key+'"]').forEach(b=>b.classList.toggle('active', b===btn));
+  drawPinnedTrend();
+}
+function togglePinnedKw(i){
+  const kw=PINNED_KWS[i];
+  if(pinnedState.hidden.has(kw)) pinnedState.hidden.delete(kw); else pinnedState.hidden.add(kw);
+  drawPinnedTrend();
+}
+function pinnedNice(rawMax,target,isCount){
+  if(!(rawMax>0)) return {max:1,step:1};
+  rawMax*=1.05;
+  const rough=rawMax/target, pw=Math.pow(10,Math.floor(Math.log10(rough))), f=rough/pw;
+  let step=(f<=1?1:f<=2?2:f<=5?5:10)*pw;
+  if(isCount) step=Math.max(step,1);
+  return {max:Math.ceil(rawMax/step)*step, step};
+}
+function pinnedLine(canvas,W,H,labels,datasets,opt){
+  const dpr=window.devicePixelRatio||1;
+  canvas.width=W*dpr; canvas.height=H*dpr; canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  const small=!!opt.small;
+  const PAD=small?{top:8,right:20,bottom:20,left:40}:{top:14,right:26,bottom:34,left:56};
+  const cW=W-PAD.left-PAD.right, cH=H-PAD.top-PAD.bottom;
+  const all=datasets.flatMap(d=>d.data.filter(v=>v!==null));
+  const isCount=opt.metric!=='cvr';
+  const sc=pinnedNice(Math.max(0,...all),small?2:5,isCount);
+  const max=sc.max, step=sc.step, nGrid=Math.round(max/step);
+  const n=labels.length, t=opt.times;
+  const tSpan=t&&n>1?(t[n-1]-t[0]):0;
+  const xPos=i=>PAD.left+(n>1?(tSpan>0?(t[i]-t[0])/tSpan:i/(n-1))*cW:cW/2);
+  const yPos=v=>PAD.top+cH-v/max*cH;
+  ctx.font=(small?9:10)+'px sans-serif';
+  for(let g=0;g<=nGrid;g++){
+    const v=g*step, y=yPos(v);
+    ctx.strokeStyle='#e2e6ef'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(PAD.left,y); ctx.lineTo(PAD.left+cW,y); ctx.stroke();
+    const txt=opt.metric==='cvr' ? v.toFixed(step<1?1:0)+'%' : (v>=1000 ? (v/1000)+'K' : String(Math.round(v)));
+    ctx.fillStyle='#adb5c7'; ctx.textAlign='right'; ctx.fillText(txt,PAD.left-6,y+3);
+  }
+  ctx.fillStyle='#5a6478'; ctx.textAlign='center';
+  const lstep=Math.max(1,Math.ceil(n/(small?3:10)));
+  for(let i=0;i<n;i++){
+    if((n-1-i)%lstep!==0) continue;
+    ctx.fillText(labels[i],xPos(i),H-PAD.bottom+(small?13:17));
+  }
+  datasets.forEach(ds=>{
+    ctx.strokeStyle=ds.color; ctx.lineWidth=small?2:2.2; ctx.lineJoin='round'; ctx.beginPath();
+    let started=false;
+    ds.data.forEach((v,i)=>{ if(v===null){started=false;return;} const x=xPos(i),y=yPos(v); if(!started){ctx.moveTo(x,y);started=true;} else ctx.lineTo(x,y); });
+    ctx.stroke();
+    ds.data.forEach((v,i)=>{ if(v===null) return; ctx.beginPath(); ctx.arc(xPos(i),yPos(v),small?2.4:3.4,0,Math.PI*2); ctx.fillStyle=ds.color; ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.stroke(); });
+  });
+}
+function drawPinnedTrend(){
+  const wrap=document.getElementById('pinned-chart'); if(!wrap) return;
+  const leg=document.getElementById('pinned-legend'), tbl=document.getElementById('pinned-table');
+  if(!allData.length||!weeks.length){
+    wrap.innerHTML='<div style="text-align:center;padding:40px 0;color:var(--text-muted);font-size:13px">데이터를 먼저 업로드하세요</div>';
+    leg.innerHTML=''; tbl.innerHTML=''; return;
+  }
+  const ws=pinnedWeeks(), metric=pinnedState.metric;
+  const labels=ws.map(w=>w.slice(5).replace('-','.')), times=ws.map(w=>Date.parse(w));
+  const series=PINNED_KWS.map((kw,i)=>({kw,i,color:CHART_COLORS[i%CHART_COLORS.length],data:ws.map(w=>pinnedVal(kw,w,metric))}));
+  const hasData=s=>s.data.some(v=>v!==null);
+
+  leg.innerHTML=series.map(s=>{
+    const off=pinnedState.hidden.has(s.kw)||!hasData(s);
+    return '<span class="pin-leg" onclick="togglePinnedKw('+s.i+')" style="opacity:'+(off?0.35:1)+'"><span style="width:10px;height:10px;border-radius:50%;background:'+s.color+';display:inline-block"></span>'+s.kw+(hasData(s)?'':' (데이터 없음)')+'</span>';
+  }).join('');
+
+  if(pinnedState.view==='combined'){
+    wrap.innerHTML='<canvas id="pinned-canvas"></canvas>';
+    const W=Math.max(320,wrap.clientWidth), H=360;
+    pinnedLine(document.getElementById('pinned-canvas'),W,H,labels,series.filter(s=>!pinnedState.hidden.has(s.kw)&&hasData(s)),{metric,times});
+  } else {
+    wrap.innerHTML='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">'+series.map(s=>{
+      const ch=pinnedChange(s.data,metric), last=s.data[s.data.length-1];
+      const chHtml=ch?'<span style="font-size:11px;font-weight:600;color:'+(ch.v>0?'var(--green)':ch.v<0?'var(--red)':'var(--text-dim)')+'">'+(ch.v>0?'▲':ch.v<0?'▼':'')+' '+ch.txt+'</span>':'';
+      return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;min-width:0">'
+        +'<div style="font-size:11px;font-weight:600;color:'+s.color+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+s.kw+'">● '+s.kw+'</div>'
+        +'<div style="display:flex;align-items:baseline;gap:8px;margin:4px 0 2px"><span style="font-size:16px;font-weight:700;font-family:var(--font-data)">'+pinnedFmt(last,metric)+'</span>'+chHtml+'</div>'
+        +'<canvas id="pinned-mini-'+s.i+'"></canvas></div>';
+    }).join('')+'</div>';
+    series.forEach(s=>{
+      const cv=document.getElementById('pinned-mini-'+s.i);
+      const W=Math.max(160,cv.parentElement.clientWidth-24);
+      pinnedLine(cv,W,120,labels,hasData(s)?[s]:[],{metric,small:true,times});
+    });
+  }
+
+  const rows=series.map(s=>{
+    const ch=pinnedChange(s.data,metric);
+    const chTd=ch?'<span style="color:'+(ch.v>0?'var(--green)':ch.v<0?'var(--red)':'var(--text-dim)')+'">'+ch.txt+'</span>':'–';
+    return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 10px;font-size:11px;font-weight:600;white-space:nowrap;color:'+s.color+'">● '+s.kw+'</td>'
+      +s.data.map(v=>'<td style="padding:7px 10px;font-size:11px;text-align:right;font-family:var(--font-data)">'+pinnedFmt(v,metric)+'</td>').join('')
+      +'<td style="padding:7px 10px;font-size:11px;text-align:right;font-family:var(--font-data)">'+chTd+'</td></tr>';
+  }).join('');
+  tbl.innerHTML='<div style="border:1px solid var(--border);border-radius:8px;overflow:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid var(--border)">'
+    +'<th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text-dim)">키워드 · '+METRIC_LABELS[metric]+'</th>'
+    +labels.map(l=>'<th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--text-dim)">'+l+'</th>').join('')
+    +'<th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--text-dim)">최근 변화</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+let _pinRz;
+window.addEventListener('resize',()=>{ clearTimeout(_pinRz); _pinRz=setTimeout(()=>{ const pg=document.getElementById('page-trend'); if(pg&&pg.classList.contains('active')) drawPinnedTrend(); },150); });
+
 function renderTrendPage(){
+  drawPinnedTrend();
   if(!allData.length){ return; }
   buildWeekChips();
   renderKwChips();
